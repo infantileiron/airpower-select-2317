@@ -46,6 +46,12 @@ CREATE TABLE `runs` (
   `state` varchar(20) DEFAULT NULL,
   `result` json DEFAULT NULL,
   `error` text,
+  `progress` json DEFAULT NULL,
+  `lease_owner` varchar(64) DEFAULT NULL,
+  `lease_until` double DEFAULT NULL,
+  `epoch` int DEFAULT NULL,
+  `cancel_reason` text,
+  `events` json DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;

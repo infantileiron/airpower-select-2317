@@ -4,10 +4,12 @@ from fastapi import APIRouter,Depends,HTTPException,Response
 from sqlalchemy.exc import IntegrityError
 from src.config.database import db
 from src.models.entities import User,Sample,Run,Review,Audit
-from src.schemas.business import Login,SampleInput,RunInput,ReviewInput
+from src.schemas.business import Login,SampleInput,RunInput,ReviewInput,CancelInput
 from src.middlewares.auth import current,editor,admin
 from src.utils.security import verify,token
 from src.services.business import audit,dump
+from src.services.analysis import blank_progress
+from src.services.execution import event,cancel as cancel_run
 from src.controllers.business import ensure_run
 router=APIRouter()
 @router.post('/auth/login')
@@ -37,10 +39,17 @@ def edit(i:int,data:SampleInput,u=Depends(editor),s=Depends(db)):
 def runs(u=Depends(current),s=Depends(db)):return [dump(r) for r in s.query(Run).order_by(Run.id.desc()).all()]
 @router.post('/runs')
 def train(data:RunInput,u=Depends(editor),s=Depends(db)):
- rows=[dump(r) for r in s.query(Sample).order_by(Sample.hour).all()];r=Run(**data.model_dump(),result={'snapshot':rows});s.add(r);s.commit()
+ rows=[dump(r) for r in s.query(Sample).order_by(Sample.hour).all()]
+ r=Run(**data.model_dump(),result={'snapshot':rows},progress=blank_progress(data.alphas),events=[event('submit',u.email,'提交比选任务，冻结'+str(len(rows))+'小时样本')]);s.add(r);s.commit()
  try:redis.Redis.from_url(os.environ['REDIS_URL']).rpush('airpower:runs',r.id)
  except redis.RedisError:r.state='failed';r.error='队列暂不可用，请稍后重试';s.commit();raise HTTPException(503,r.error)
  audit(s,u,'提交模型 '+str(r.id));return dump(r)
+@router.post('/runs/{i}/cancel')
+def cancel(i:int,data:CancelInput,u=Depends(editor),s=Depends(db)):
+ if not s.get(Run,i):raise HTTPException(404,'模型版本不存在')
+ reason=data.reason.strip() or '未填写原因'
+ if not cancel_run(s,i,u.email,reason):raise HTTPException(409,'任务已结束，取消未生效')
+ audit(s,u,'取消模型任务 '+str(i));return dump(s.get(Run,i))
 @router.get('/runs/{i}')
 def detail(i:int,u=Depends(current),s=Depends(db)):return dump(ensure_run(s,i))
 @router.get('/runs/{i}/export')

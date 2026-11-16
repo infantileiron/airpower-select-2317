@@ -50,9 +50,13 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 所有选择使用提交时冻结输入；修订原始计量不会改写旧版本。反复查看末段指标选择特征后，该末段不再是独立最终测试集，实际落地需另设未见时间窗。没有自动控制空压机或在线模型部署。
 
+## 断点续算与并发接管
+
+每个候选alpha的3折结果逐折落库（`runs.progress`），计算进程崩溃或被重启后，其他进程按租约接管：认领与接管是同一条原子`UPDATE`，代际`epoch`递增；所有进度、结果与终态写回都带`lease_owner+epoch+state`条件，失去任务的旧进程迟到写回影响行数为0，自然失效。同折重算以（候选，折）为键覆盖，不重复计入误差。恢复只补未完成折，输入为提交时冻结的快照，折划分由`TimeSeriesSplit`确定性重放，最终结果与不中断完全一致。全部折完成后才以一次条件更新发布done版本；取消（`POST /runs/{id}/cancel`，仅queued/running）同样是原子更新，与发布竞争只保留一个终态。cancelled版本不发布结果、不能导出、不能起草评议；已done版本保持可读。模型比选页展示逐折进度、当前计算进程与租约、接管和取消原因（`runs.events`留痕）。worker无状态，可多进程并发运行（同机多次`python -m src.worker`，或去掉`container_name`后`--scale worker=N`），启动与每5秒周期扫描会把queued及租约过期的running任务重新入队（Redis集合作去重）。
+
 ## 工程说明
 
-Python3.11/FastAPI/SQLAlchemy/scikit-learn/NumPy、原生ES modules/CSS、Nginx、MySQL8、Redis7。恰好五服务frontend/backend/worker/db/redis；全部有健康检查；后端等数据库/Redis，worker还等后端，前端等后端。worker真实消费Redis模型任务，心跳`/tmp/heartbeat`，结果写共享`/artifacts`卷；重启恢复queued/running任务。数据库、Redis和结果均命名卷。
+Python3.11/FastAPI/SQLAlchemy/scikit-learn/NumPy、原生ES modules/CSS、Nginx、MySQL8、Redis7。恰好五服务frontend/backend/worker/db/redis；全部有健康检查；后端等数据库/Redis，worker还等后端，前端等后端。worker真实消费Redis模型任务，心跳`/tmp/heartbeat`，结果写共享`/artifacts`卷；重启恢复queued及租约过期的running任务。数据库、Redis和结果均命名卷。
 
 Nginx `/api/`转后端根路由，前端SPA回落。仅前端、后端和数据库映射宿主端口。用 `docker compose down -v --remove-orphans`清理本项目测试数据。
 
@@ -64,4 +68,4 @@ Nginx `/api/`转后端根路由，前端SPA回落。仅前端、后端和数据�
 
 ## 范围与交付
 
-逐条表单/API录入及完整字段修订，无Excel批导、删除或分页。固定站点ZX-A01，无自动仪表采集；单worker；评议站内签核，没有外部通知或设备控制。Google Fonts离线时回退serif/sans-serif。测试脚本、截图、真实结果和已知差异在 `../../test-artifacts/gb-3110/TESTING.md`，源码不放截图或测试报告。MIT License，见LICENSE。
+逐条表单/API录入及完整字段修订，无Excel批导、删除或分页。固定站点ZX-A01，无自动仪表采集；计算进程可多开但同一任务同一时刻只有一个持有者；评议站内签核，没有外部通知或设备控制。Google Fonts离线时回退serif/sans-serif。断点续算、并发接管与取消竞争的检验见 `backend/tests/test_execution.py`（`python -m pytest tests/`）。测试脚本、截图、真实结果和已知差异在 `../../test-artifacts/gb-3110/TESTING.md`，源码不放截图或测试报告。MIT License，见LICENSE。
